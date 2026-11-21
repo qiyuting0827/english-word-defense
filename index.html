@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#161036">
+  <meta name="description" content="单词守卫队 —— 面向小学生的英语词汇守卫小游戏">
+  <title>单词守卫队 · 英语词汇小游戏</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- 背景装饰（纯 CSS/静态，不需要 JS） -->
+  <div class="sky" aria-hidden="true">
+    <span class="sky__star sky__star--1"></span>
+    <span class="sky__star sky__star--2"></span>
+    <span class="sky__star sky__star--3"></span>
+    <span class="sky__cloud sky__cloud--1"></span>
+    <span class="sky__cloud sky__cloud--2"></span>
+  </div>
+
+  <main id="app" class="app">
+
+    <!-- 全局状态条（game.js 首选 #status-message，回退 #tray-hint） -->
+    <p id="status-message" class="status-bar" role="status" aria-live="polite">选择年级、册次和单元开始学习吧！</p>
+
+    <!-- ============ 视图 1：首页 ============ -->
+    <section id="screen-home" class="screen screen--home" data-screen="home" aria-label="首页" aria-hidden="false">
+
+      <div class="home__hero">
+        <div class="home__badge" aria-hidden="true">🛡️</div>
+        <h1 class="home__title">单词守卫队</h1>
+        <p class="home__tagline">鲁教版五四制 · 三年级到五年级</p>
+      </div>
+
+      <div class="home__actions">
+        <!-- data-action="start" → 打开选择屏（#screen-units） -->
+        <button type="button" id="btn-start" class="btn btn--primary btn--xl" data-action="start">
+          ▶ 开始游戏
+        </button>
+        <!-- data-action="toggle-sound" → 音效开关；#sound-label 由 JS 更新 -->
+        <button type="button" id="btn-sound" class="btn btn--ghost" data-action="toggle-sound" aria-pressed="true">
+          <span class="btn__icon" aria-hidden="true">🔊</span>
+          <span id="sound-label">音效：开</span>
+        </button>
+      </div>
+
+      <ul class="home__tips" aria-label="玩法提示">
+        <li>🃏 点图片卡</li>
+        <li>🛣️ 点小路出招</li>
+        <li>🌟 守住就有星星</li>
+      </ul>
+    </section>
+
+    <!-- ============ 视图 2：选择年级 / 册次 / 单元 ============ -->
+    <!-- 空容器：JS 渲染年级与册次胶囊（.book-filter）和单元卡片（#unit-grid） -->
+    <section id="screen-units" class="screen screen--units" data-screen="units" aria-label="选择年级与单元" hidden aria-hidden="true">
+      <header class="topbar">
+        <!-- data-action="back-home" → 返回首页 -->
+        <button type="button" class="btn btn--icon" data-action="back-home" aria-label="返回首页">←</button>
+        <h2 class="topbar__title">选择年级和单元</h2>
+        <span class="topbar__spacer" aria-hidden="true"></span>
+      </header>
+
+      <!-- JS：年级胶囊 → 册次胶囊（select-grade / select-book），初始为空 -->
+      <div class="book-filter" role="tablist" aria-label="选择年级与册次"></div>
+
+      <!-- JS：单元卡片（show-preview）或空状态（.home-empty），初始为空 -->
+      <div id="unit-grid" class="unit-grid"></div>
+    </section>
+
+    <!-- ============ 视图 3：单词预习 ============ -->
+    <section id="screen-preview" class="screen screen--preview" data-screen="preview" aria-label="单词预习" hidden aria-hidden="true">
+      <header class="topbar">
+        <!-- data-action="back-units" → 返回选择屏 -->
+        <button type="button" class="btn btn--icon" data-action="back-units" aria-label="返回选择屏">←</button>
+        <h2 class="topbar__title" id="preview-title">单词预习</h2>
+        <span class="topbar__spacer" aria-hidden="true"></span>
+      </header>
+
+      <p class="preview__hint">先读一读，点卡片听发音 👂</p>
+
+      <!-- JS 按所选单元填充单词卡，初始为空 -->
+      <ul id="preview-list" class="preview-list"></ul>
+
+      <div class="preview__footer preview-actions">
+        <!-- data-action="start-game" → 进入对战 -->
+        <button type="button" id="btn-enter-battle" class="btn btn--primary btn--xl" data-action="start-game">
+          🛡️ 开始守卫
+        </button>
+        <!-- data-action="back-home" → 回首页 -->
+        <button type="button" class="btn btn--ghost btn--block" data-action="back-home">🏠 回到首页</button>
+      </div>
+    </section>
+
+    <!-- ============ 视图 4：对战主界面 ============ -->
+    <section id="screen-game" class="screen screen--game" data-screen="game" aria-label="守卫对战" hidden aria-hidden="true">
+
+      <!-- 顶部 HUD：得分 / 波次 / 生命 / 提示 / 暂停 -->
+      <header id="hud" class="hud">
+        <div class="hud__stat" id="hud-score-box">
+          <span class="hud__label">得分</span>
+          <strong id="hud-score" class="hud__value">0</strong>
+        </div>
+        <div class="hud__stat" id="hud-wave-box">
+          <span class="hud__label">波次</span>
+          <strong id="hud-wave" class="hud__value">1 / 4</strong>
+        </div>
+        <div class="hud__stat hud__stat--hearts" id="hud-hearts-box" aria-label="城堡生命">
+          <span class="hud__label">生命</span>
+          <strong id="hud-hearts" class="hud__value">❤️❤️❤️</strong>
+        </div>
+        <!-- data-action="use-hint" → 高亮最前面的敌人；[data-hint-count] 由 JS 更新 -->
+        <button type="button" id="btn-hint" class="btn btn--icon btn--hud btn--hint" data-action="use-hint" aria-label="使用提示，还剩 5 次">
+          💡<span class="btn__hint-count" data-hint-count>5</span>
+        </button>
+        <!-- data-action="pause" → 打开暂停弹窗 -->
+        <button type="button" id="btn-pause" class="btn btn--icon btn--hud" data-action="pause" aria-label="暂停">⏸</button>
+      </header>
+
+      <!-- 出招三步说明（静态文案；hook: #battle-guide / .battle-guide__step） -->
+      <p id="battle-guide" class="battle-guide" aria-label="出招步骤">
+        <span class="battle-guide__step">1️⃣ 读敌人单词</span>
+        <span class="battle-guide__arrow" aria-hidden="true">›</span>
+        <span class="battle-guide__step">2️⃣ 点相同图片卡</span>
+        <span class="battle-guide__arrow" aria-hidden="true">›</span>
+        <span class="battle-guide__step">3️⃣ 点小路</span>
+      </p>
+
+      <!-- 战场：四条小路；JS 向每条 .lane__track 创建 8 个 [data-cell] 格子 -->
+      <div id="battlefield" class="battlefield" aria-label="四条防守小路">
+        <!-- data-action="drop-target" → 放置守卫；data-lane 由 JS 按 0 基索引覆盖 -->
+        <div id="lane-1" class="lane" data-lane="1" data-action="drop-target" data-state="idle" role="button" tabindex="0" aria-label="第 1 条小路">
+          <span class="lane__num" aria-hidden="true">1</span>
+          <div class="lane__track" id="lane-1-track"></div>
+          <span class="lane__base" aria-hidden="true">🏰</span>
+        </div>
+
+        <div id="lane-2" class="lane" data-lane="2" data-action="drop-target" data-state="idle" role="button" tabindex="0" aria-label="第 2 条小路">
+          <span class="lane__num" aria-hidden="true">2</span>
+          <div class="lane__track" id="lane-2-track"></div>
+          <span class="lane__base" aria-hidden="true">🏰</span>
+        </div>
+
+        <div id="lane-3" class="lane" data-lane="3" data-action="drop-target" data-state="idle" role="button" tabindex="0" aria-label="第 3 条小路">
+          <span class="lane__num" aria-hidden="true">3</span>
+          <div class="lane__track" id="lane-3-track"></div>
+          <span class="lane__base" aria-hidden="true">🏰</span>
+        </div>
+
+        <div id="lane-4" class="lane" data-lane="4" data-action="drop-target" data-state="idle" role="button" tabindex="0" aria-label="第 4 条小路">
+          <span class="lane__num" aria-hidden="true">4</span>
+          <div class="lane__track" id="lane-4-track"></div>
+          <span class="lane__base" aria-hidden="true">🏰</span>
+        </div>
+
+        <!-- 战场飘字（#battle-toast：JS 显示/隐藏 + data-tone） -->
+        <div id="battle-toast" class="battle-toast" aria-hidden="true" hidden></div>
+      </div>
+
+      <!-- 图片卡槽：对战开始时由 JS 填充，初始为空 -->
+      <div id="card-tray" class="tray" aria-label="图片卡槽"></div>
+
+      <!-- 状态回退提示（#status-message 存在时保持为空；JS 仅在其缺失时写入） -->
+      <p id="tray-hint" class="tray__hint"></p>
+    </section>
+
+    <!-- ============ 暂停弹窗 ============ -->
+    <div id="modal-pause" class="modal" role="dialog" aria-modal="true" aria-labelledby="pause-title" hidden>
+      <div class="modal__panel">
+        <h2 id="pause-title" class="modal__title">休息一下 ☕</h2>
+        <!-- data-action="resume" → 关闭弹窗继续 -->
+        <button type="button" class="btn btn--primary btn--block" data-action="resume">▶ 继续游戏</button>
+        <!-- data-action="restart" → 重开本单元 -->
+        <button type="button" class="btn btn--ghost btn--block" data-action="restart">↻ 重新开始</button>
+        <!-- data-action="quit-home" → 回首页 -->
+        <button type="button" class="btn btn--danger btn--block" data-action="quit-home">🏠 回到首页</button>
+      </div>
+    </div>
+
+    <!-- ============ 结算弹窗 ============ -->
+    <div id="modal-result" class="modal" role="dialog" aria-modal="true" aria-labelledby="result-title" hidden>
+      <div class="modal__panel modal__panel--result">
+        <div id="result-emoji" class="result__emoji" aria-hidden="true">🎉</div>
+        <h2 id="result-title" class="modal__title">守卫成功！</h2>
+        <div id="result-stars" class="result__stars" aria-label="本关星级">⭐⭐⭐</div>
+        <p id="result-message" class="result__message">挡住所有单词敌人就能拿满星星！</p>
+        <dl class="result__stats">
+          <div>
+            <dt>得分</dt>
+            <dd id="result-score">0</dd>
+          </div>
+          <div>
+            <dt>答对</dt>
+            <dd id="result-correct">0 / 0</dd>
+          </div>
+        </dl>
+        <div class="result-actions">
+          <!-- data-action="retry" → 再玩一次本单元 -->
+          <button type="button" id="btn-retry" class="btn btn--primary btn--block" data-action="retry">↻ 再玩一次</button>
+          <!-- data-action="next-unit" → 下一个单元预习页 -->
+          <button type="button" id="btn-next-unit" class="btn btn--ghost btn--block" data-action="next-unit">➡ 下一个单元</button>
+          <!-- data-action="quit-home" → 回首页 -->
+          <button type="button" class="btn btn--ghost btn--block" data-action="quit-home">🏠 回到首页</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <noscript>
+    <p class="noscript-note">需要开启 JavaScript 才能玩这个游戏哦。</p>
+  </noscript>
+
+  <!-- 加载顺序固定：词表数据 → 课程结构 → 游戏逻辑 -->
+  <script src="vocabulary.js" defer></script>
+  <script src="data.js" defer></script>
+  <script src="game.js" defer></script>
+</body>
+</html>
