@@ -424,7 +424,7 @@
     hints: 5,
     spawnGapMs: 2300,
     spawnJitterMs: 700,
-    waveGapMs: 3200,
+    waveGapMs: 2000,
     enemySpeed: 0.62,        // cells per second
     fireIntervalMs: 900,     // defender shot cooldown
     cardCooldownMs: 2400,    // same card recharge time

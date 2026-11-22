@@ -179,7 +179,7 @@ test('preview list renders the sampled English and Chinese pool with its count',
   assert.equal(list.children[0].dataset.word, 'word-0');
 });
 
-test('slower pace scales movement and every arrival interval consistently', () => {
+test('pace scales arrivals within a wave while wave breaks remain 2 seconds', () => {
   const { api } = freshGame();
   const words = makeUnit('unit-pace', 8).words;
   const rng = () => 0;
@@ -190,8 +190,14 @@ test('slower pace scales movement and every arrival interval consistently', () =
   assert.equal(slow.length, fast.length);
   assert.equal(fast[0].time, 1200);
   assert.equal(slow[0].time, 6000);
-  for (let i = 0; i < fast.length; i += 1) {
-    assert.equal(slow[i].time, fast[i].time * 5);
+  for (let i = 1; i < fast.length; i += 1) {
+    if (fast[i].wave === fast[i - 1].wave) {
+      assert.equal(fast[i].time - fast[i - 1].time, api.config.spawnGapMs);
+      assert.equal(slow[i].time - slow[i - 1].time, api.config.spawnGapMs / 0.2);
+    } else {
+      assert.equal(fast[i].time - fast[i - 1].time, 2000);
+      assert.equal(slow[i].time - slow[i - 1].time, 2000);
+    }
   }
 
   assert.equal(api.enemySpeedFor(1), api.config.enemySpeed);

@@ -1455,9 +1455,11 @@
           meaning: word.meaning,
           emoji: word.emoji
         });
-        t += Math.round((CFG.spawnGapMs + Math.floor(random() * CFG.spawnJitterMs)) / speed);
+        if (i + 1 < sizes[waveIndex]) {
+          t += Math.round((CFG.spawnGapMs + Math.floor(random() * CFG.spawnJitterMs)) / speed);
+        }
       }
-      t += Math.round(CFG.waveGapMs / speed);
+      if (waveIndex + 1 < sizes.length) t += CFG.waveGapMs;
     }
     return queue;
   }
