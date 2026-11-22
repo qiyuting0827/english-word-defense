@@ -1,0 +1,36 @@
+{
+  "id": "./",
+  "name": "单词守卫队 · 英语词汇小游戏",
+  "short_name": "单词守卫队",
+  "description": "面向小学生的英语词汇守卫小游戏：选单元、听发音、点图片守小路。",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "scope": "./",
+  "start_url": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#161036",
+  "theme_color": "#161036",
+  "categories": ["education", "games", "kids"],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

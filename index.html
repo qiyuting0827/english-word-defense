@@ -7,6 +7,16 @@
   <meta name="description" content="单词守卫队 —— 面向小学生的英语词汇守卫小游戏">
   <title>单词守卫队 · 英语词汇小游戏</title>
   <link rel="stylesheet" href="styles.css">
+
+  <!-- PWA 资源（全部相对路径：GitHub Pages /english-word-defense/ 子路径同样生效） -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
+  <link rel="icon" href="icons/icon-512.png" sizes="512x512" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="单词守卫队">
 </head>
 <body>
   <!-- 背景装饰（纯 CSS/静态，不需要 JS） -->
@@ -49,6 +59,56 @@
         <li>🛣️ 点小路出招</li>
         <li>🌟 守住就有星星</li>
       </ul>
+
+      <!-- 学习记录 · 云同步（家长用；state hooks 见下） -->
+      <section id="sync-panel" class="sync" aria-labelledby="sync-title">
+        <div class="sync__head">
+          <h2 id="sync-title" class="sync__title">☁️ 学习记录 · 同步</h2>
+          <!-- data-action="sync-now" -->
+          <button type="button" class="btn btn--ghost btn--small" data-action="sync-now">🔄 立即同步</button>
+        </div>
+
+        <p class="sync__warn">
+          ⚠️ <strong>同步码就是钥匙</strong>，请像保管密码一样保管好它。<br>
+          本功能<strong>不需要姓名</strong>等个人信息。
+        </p>
+
+        <!-- 状态区：data-state = empty | loading | error | ok（由 JS 切换） -->
+        <p id="sync-status" class="sync__status" role="status" aria-live="polite" data-state="empty">还没有连接同步。</p>
+
+        <dl class="sync__meta">
+          <div class="sync__meta-item">
+            <dt>最近同步</dt>
+            <dd id="sync-last-at">—</dd>
+          </div>
+          <div class="sync__meta-item">
+            <dt>学习记录</dt>
+            <dd id="progress-summary">暂无记录</dd>
+          </div>
+        </dl>
+
+        <!-- 最近记录列表（CSS 提供 :empty 空状态；JS 填充） -->
+        <ul id="record-list" class="sync__records" aria-label="最近学习记录"></ul>
+
+        <div class="sync__row">
+          <label class="sync__label" for="sync-code-input">同步码</label>
+          <input id="sync-code-input" class="sync__input" type="text" inputmode="latin"
+                 autocomplete="off" spellcheck="false" maxlength="115"
+                 placeholder="输入对方给的同步码" aria-describedby="sync-status">
+          <output id="sync-code-display" class="sync__code">未生成</output>
+        </div>
+
+        <div class="sync__actions">
+          <!-- data-action="create-sync-code" -->
+          <button type="button" class="btn btn--primary btn--small" data-action="create-sync-code">🔑 生成我的码</button>
+          <!-- data-action="connect-sync-code" -->
+          <button type="button" class="btn btn--small" data-action="connect-sync-code">🤝 连接</button>
+          <!-- data-action="copy-sync-code" -->
+          <button type="button" class="btn btn--ghost btn--small" data-action="copy-sync-code">📋 复制</button>
+          <!-- data-action="disconnect-sync" -->
+          <button type="button" class="btn btn--danger btn--small" data-action="disconnect-sync">断开</button>
+        </div>
+      </section>
     </section>
 
     <!-- ============ 视图 2：选择年级 / 册次 / 单元 ============ -->
@@ -81,6 +141,29 @@
 
       <!-- JS 按所选单元填充单词卡，初始为空 -->
       <ul id="preview-list" class="preview-list"></ul>
+
+      <!-- 对战模式（三选一，可自由切换）：hooks #match-mode-group / #match-mode-hint -->
+      <fieldset id="match-mode-group" class="match-mode">
+        <legend class="match-mode__legend">对战模式</legend>
+        <div class="match-mode__options">
+          <button type="button" class="match-mode__btn" data-action="select-match-mode" data-match-mode="classic" aria-pressed="true">经典</button>
+          <button type="button" class="match-mode__btn" data-action="select-match-mode" data-match-mode="zh-to-en" aria-pressed="false">汉译英</button>
+          <button type="button" class="match-mode__btn" data-action="select-match-mode" data-match-mode="en-to-zh" aria-pressed="false">英译汉</button>
+        </div>
+      </fieldset>
+      <p id="match-mode-hint" class="match-mode__hint">经典：英文敌人 + 图片卡；汉译英：看中文选英文；英译汉：看英文选中文。</p>
+
+      <!-- 本局词数（选词数 + 小卡）：带标签的单选组
+           hooks: #round-size-group / .round-size__btn / #round-size-hint -->
+      <fieldset id="round-size-group" class="round-size">
+        <legend class="round-size__legend">本局词数</legend>
+        <div class="round-size__options">
+          <button type="button" class="round-size__btn" data-action="select-round-size" data-round-size="6" aria-pressed="true">6词</button>
+          <button type="button" class="round-size__btn" data-action="select-round-size" data-round-size="10" aria-pressed="false">10词</button>
+          <button type="button" class="round-size__btn" data-action="select-round-size" data-round-size="15" aria-pressed="false">15词</button>
+        </div>
+      </fieldset>
+      <p id="round-size-hint" class="round-size__hint">本局随机抽取这些词，敌人只考这组词。</p>
 
       <div class="preview__footer preview-actions">
         <!-- data-action="start-game" → 进入对战 -->
@@ -211,9 +294,18 @@
     <p class="noscript-note">需要开启 JavaScript 才能玩这个游戏哦。</p>
   </noscript>
 
-  <!-- 加载顺序固定：词表数据 → 课程结构 → 游戏逻辑 -->
+  <!-- 加载顺序固定：词表数据 → 课程结构 → 游戏逻辑 → 学习记录同步 -->
   <script src="vocabulary.js" defer></script>
   <script src="data.js" defer></script>
   <script src="game.js" defer></script>
+  <script src="progress-sync.js" defer></script>
+  <!-- 相对路径注册 Service Worker（./ 按页面目录解析，GitHub Pages 子路径可用） -->
+  <script>
+    window.addEventListener('load', function () {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(function () {});
+      }
+    });
+  </script>
 </body>
 </html>

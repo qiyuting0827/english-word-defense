@@ -16,6 +16,11 @@
   var CFG = Data.CONFIG;
   /* Generic, original monster glyph. It must never be a vocabulary emoji. */
   var CREATURE_ICON = '👾';
+  var ROUND_SIZE_DEFAULT = 6;
+  var ROUND_SIZE_STORAGE_KEY = 'english-kids:round-size';
+  var MATCH_MODE_DEFAULT = 'classic';
+  var MATCH_MODE_STORAGE_KEY = 'english-kids:match-mode';
+  var MATCH_MODES = ['classic', 'zh-to-en', 'en-to-zh'];
   var state = {
     unit: null,
     unitId: null,
@@ -44,6 +49,9 @@
     combo: 0,
     kills: 0,
     learned: new Set(),
+    roundSize: ROUND_SIZE_DEFAULT,
+    matchMode: MATCH_MODE_DEFAULT,
+    activeWords: [],
     loopId: null,
     lastFrame: 0,
     reducedMotion: false,
@@ -116,6 +124,120 @@
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
+  }
+
+  function normalizeRoundSize(value) {
+    var parsed = parseInt(value, 10);
+    return isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  function loadRoundSize() {
+    try {
+      var stored = root.localStorage && root.localStorage.getItem(ROUND_SIZE_STORAGE_KEY);
+      var parsed = normalizeRoundSize(stored);
+      if (parsed) state.roundSize = parsed;
+    } catch (err) { /* storage is optional */ }
+  }
+
+  function saveRoundSize(size) {
+    try {
+      if (root.localStorage) {
+        root.localStorage.setItem(ROUND_SIZE_STORAGE_KEY, String(size));
+      }
+    } catch (err) { /* storage is optional */ }
+  }
+
+  function normalizeMatchMode(value) {
+    return MATCH_MODES.indexOf(value) >= 0 ? value : null;
+  }
+
+  function loadMatchMode() {
+    try {
+      var stored = root.localStorage && root.localStorage.getItem(MATCH_MODE_STORAGE_KEY);
+      var mode = normalizeMatchMode(stored);
+      if (mode) state.matchMode = mode;
+    } catch (err) { /* storage is optional */ }
+  }
+
+  function saveMatchMode(mode) {
+    try {
+      if (root.localStorage) {
+        root.localStorage.setItem(MATCH_MODE_STORAGE_KEY, mode);
+      }
+    } catch (err) { /* storage is optional */ }
+  }
+
+  /* Canonical identity always stays word.word / word.meaning. These helpers
+     only choose which language is visible for the current mode. */
+  function cardLabelFor(word) {
+    if (!word) return '';
+    return state.matchMode === 'en-to-zh' ? word.meaning : word.word;
+  }
+
+  function enemyClueFor(word) {
+    if (!word) return '';
+    return state.matchMode === 'zh-to-en' ? word.meaning : word.word;
+  }
+
+  function cardAriaLabelFor(word) {
+    if (!word) return '';
+    if (state.matchMode === 'zh-to-en') return '英语卡片：' + word.word;
+    if (state.matchMode === 'en-to-zh') return '中文卡片：' + word.meaning;
+    return '图片卡片：' + word.meaning + '（' + word.word + '）';
+  }
+
+  function enemyAriaLabelFor(word) {
+    return '单词敌人：' + enemyClueFor(word);
+  }
+
+  function matchModeHintText() {
+    if (state.matchMode === 'zh-to-en') {
+      return '汉译英：敌人只显示中文意思，卡片只显示英语单词。';
+    }
+    if (state.matchMode === 'en-to-zh') {
+      return '英译汉：敌人只显示英语单词，卡片只显示中文意思。';
+    }
+    return '经典：敌人显示英语单词，卡片是图片（含英语标签）。';
+  }
+
+  function matchModeInstruction() {
+    if (state.matchMode === 'zh-to-en') {
+      return '敌人显示中文意思，请把对应的英语卡片放到同一行，守住右边的基地！点“提示”可以找线索。';
+    }
+    if (state.matchMode === 'en-to-zh') {
+      return '敌人显示英语单词，请把对应的中文卡片放到同一行，守住右边的基地！点“提示”可以找线索。';
+    }
+    return '把和敌人单词相同的卡片放到同一行，守住右边的基地！点“提示”可以找答案。';
+  }
+
+  function matchModePreviewStatus() {
+    if (state.matchMode === 'zh-to-en') {
+      return '先读一读单词。开始后敌人出中文意思，你选对应的英语卡片。';
+    }
+    if (state.matchMode === 'en-to-zh') {
+      return '先读一读单词。开始后敌人出英语单词，你选对应的中文卡片。';
+    }
+    return '先读一读单词，点击卡片可以听发音。准备好了就点“开始游戏”。';
+  }
+
+  /* Distinct, valid words from a unit, in curriculum order. */
+  function getUnitWords(unit) {
+    var words = unit && Array.isArray(unit.words) ? unit.words : [];
+    var seen = Object.create(null);
+    return words.filter(function (word) {
+      if (!word || !word.word || seen[word.word]) return false;
+      seen[word.word] = true;
+      return true;
+    });
+  }
+
+  /* Pick the pool for one battle without mutating the curriculum data. */
+  function pickRoundWords(unit, rng) {
+    var words = getUnitWords(unit);
+    if (!words.length) return [];
+    var random = typeof rng === 'function' ? rng : Math.random;
+    var size = Math.min(state.roundSize, words.length);
+    return Data.shuffle(words, random).slice(0, size);
   }
 
   var HTML_ESCAPES = {
@@ -657,6 +779,8 @@
     list.innerHTML = '';
     setText('#preview-title', title);
     setText('[data-preview-title]', title);
+    updateMatchModeControls();
+    updateRoundSizeControls(unit);
 
     var hasHeading = !!$('#preview-title') || !!$('#screen-preview .preview-heading');
     if (!hasHeading) {
@@ -709,6 +833,161 @@
       button.disabled = !enabled;
       button.setAttribute('aria-disabled', String(!enabled));
       button.classList.toggle('is-disabled', !enabled);
+    });
+  }
+
+  function updateRoundSizeHint(available, effective) {
+    var node = root.document ? root.document.getElementById('round-size-hint') : null;
+    if (!node) return;
+    var text;
+    if (!available) {
+      text = '这个单元还没有单词，暂时不能选择每关单词数量。';
+    } else if (state.roundSize > available) {
+      text = '本单元只有 ' + available + ' 个单词，这一关会全部用上（' + effective +
+        ' 个），每次开始都会重新抽取。';
+    } else {
+      text = '每关从本单元 ' + available + ' 个单词里随机选 ' + effective +
+        ' 个，卡片和敌人都是这 ' + effective + ' 个，每次开始重新抽选。';
+    }
+    if (node.textContent !== text) node.textContent = text;
+  }
+
+  function updateRoundSizeControls(unit) {
+    var targetUnit = unit || state.unit;
+    var available = getUnitWords(targetUnit).length;
+    var effective = available ? Math.min(state.roundSize, available) : state.roundSize;
+    $$("[data-action='select-round-size']").forEach(function (button) {
+      var size = normalizeRoundSize(button.dataset.roundSize);
+      if (!size) return;
+      var unavailable = available > 0 && size > available;
+      var selected = size === state.roundSize;
+      button.disabled = unavailable;
+      button.setAttribute('aria-disabled', String(unavailable));
+      button.setAttribute('aria-pressed', String(selected));
+      button.classList.toggle('is-selected', selected);
+      button.classList.toggle('is-active', selected);
+      button.classList.toggle('is-disabled', unavailable);
+      button.dataset.selected = selected ? 'true' : 'false';
+      button.dataset.available = String(available ? Math.min(size, available) : size);
+    });
+    updateRoundSizeHint(available, effective);
+  }
+
+  function selectRoundSize(value) {
+    var size = normalizeRoundSize(value);
+    if (!size || size === state.roundSize) {
+      if (size) updateRoundSizeControls(state.unit);
+      return;
+    }
+    state.roundSize = size;
+    saveRoundSize(size);
+    updateRoundSizeControls(state.unit);
+
+    var available = getUnitWords(state.unit).length;
+    if (!available) {
+      setStatus('已选择每关 ' + size + ' 个单词。');
+    } else if (size > available) {
+      setStatus('已选择每关 ' + size + ' 个单词；本单元只有 ' + available +
+        ' 个，这一关会全部用上。');
+    } else {
+      setStatus('已选择每关 ' + size + ' 个单词，开始游戏后会随机抽选。');
+    }
+    beep(700, 60);
+    emit('english-kids:select-round-size', {
+      unitId: state.unitId,
+      roundSize: size,
+      available: available,
+      actualCount: available ? Math.min(size, available) : size
+    });
+  }
+
+  function updateBattleGuide() {
+    var node = root.document ? root.document.getElementById('battle-guide') : null;
+    if (!node) return;
+    var steps;
+    if (state.matchMode === 'zh-to-en') {
+      steps = ['1️⃣ 读中文意思', '2️⃣ 点对应英语卡', '3️⃣ 点小路'];
+    } else if (state.matchMode === 'en-to-zh') {
+      steps = ['1️⃣ 读英语单词', '2️⃣ 点对应中文卡', '3️⃣ 点小路'];
+    } else {
+      steps = ['1️⃣ 读敌人单词', '2️⃣ 点相同图片卡', '3️⃣ 点小路'];
+    }
+    node.innerHTML =
+      '<span class="battle-guide__step">' + steps[0] + '</span>' +
+      '<span class="battle-guide__arrow" aria-hidden="true">›</span>' +
+      '<span class="battle-guide__step">' + steps[1] + '</span>' +
+      '<span class="battle-guide__arrow" aria-hidden="true">›</span>' +
+      '<span class="battle-guide__step">' + steps[2] + '</span>';
+  }
+
+  function applyMatchModeUi() {
+    if (!root.document) return;
+    var targets = [
+      root.document.documentElement,
+      root.document.body,
+      $('#screen-preview'),
+      $('#screen-game'),
+      $('#screen-result')
+    ];
+    targets.forEach(function (node) {
+      if (node) node.dataset.matchMode = state.matchMode;
+    });
+
+    var tray = $('#card-tray');
+    if (tray) {
+      if (state.matchMode === 'zh-to-en') tray.setAttribute('aria-label', '英语卡片卡槽');
+      else if (state.matchMode === 'en-to-zh') tray.setAttribute('aria-label', '中文卡片卡槽');
+      else tray.setAttribute('aria-label', '图片卡槽');
+    }
+    updateBattleGuide();
+  }
+
+  function updateMatchModeControls() {
+    $$("[data-action='select-match-mode']").forEach(function (button) {
+      var mode = normalizeMatchMode(button.dataset.matchMode);
+      if (!mode) return;
+      var selected = mode === state.matchMode;
+      button.setAttribute('aria-pressed', String(selected));
+      button.classList.toggle('is-selected', selected);
+      button.classList.toggle('is-active', selected);
+      button.dataset.selected = selected ? 'true' : 'false';
+    });
+    applyMatchModeUi();
+    var hint = root.document ? root.document.getElementById('match-mode-hint') : null;
+    if (hint) {
+      var text = matchModeHintText();
+      if (hint.textContent !== text) hint.textContent = text;
+    }
+  }
+
+  function refreshMatchModePresentation() {
+    applyMatchModeUi();
+    state.cards.forEach(function (card) { renderCardElement(card); });
+    state.enemies.forEach(function (enemy) { renderEnemyElement(enemy); });
+    state.defenders.forEach(function (defender) { renderDefenderElement(defender); });
+    updateCardStates();
+  }
+
+  function selectMatchMode(value) {
+    var mode = normalizeMatchMode(value);
+    if (!mode) return;
+    if (mode === state.matchMode) {
+      updateMatchModeControls();
+      return;
+    }
+    state.matchMode = mode;
+    saveMatchMode(mode);
+    refreshMatchModePresentation();
+    updateMatchModeControls();
+
+    if (state.running) setStatus(matchModeInstruction());
+    else if (state.screen === 'screen-preview') setStatus(matchModePreviewStatus());
+    else setStatus(matchModeHintText());
+
+    beep(680, 60);
+    emit('english-kids:select-match-mode', {
+      unitId: state.unitId,
+      matchMode: mode
     });
   }
 
@@ -768,26 +1047,54 @@
     var count = Data.getWordCount(unit);
     ensurePreviewControls();
     renderPreview(unit);
+    updateMatchModeControls();
     showScreen('screen-preview');
     setStatus(count
-      ? '先读一读单词，点击卡片可以听发音。准备好了就点“开始游戏”。'
+      ? matchModePreviewStatus()
       : '这个单元还没有单词，等单词表导入后再来预览吧。');
-    emit('english-kids:preview', { unitId: unit.id, wordCount: count });
+    emit('english-kids:preview', {
+      unitId: unit.id,
+      wordCount: count,
+      matchMode: state.matchMode
+    });
   }
 
   /* ------------------------------------------------------------------ */
   /* Cards                                                               */
   /* ------------------------------------------------------------------ */
 
-  function buildCards(unit) {
+  function renderCardElement(card) {
+    if (!card || !card.el) return;
+    var button = card.el;
+    /* data-card-word is canonical English identity; data-card-label is only
+       the visible language for the selected match mode. */
+    button.dataset.cardWord = card.word;
+    button.dataset.cardLabel = cardLabelFor(card);
+    button.dataset.matchMode = state.matchMode;
+    button.setAttribute('aria-label', cardAriaLabelFor(card));
+    if (state.matchMode === 'classic') {
+      button.innerHTML =
+        '<span class="game-card__emoji game-card__image word-card__emoji" aria-hidden="true">' +
+          escapeHtml(card.emoji) + '</span>';
+    } else {
+      /* Designer CSS shows ::after { content: attr(data-card-label) } and
+         hides .game-card__emoji in translation modes. */
+      button.innerHTML = '';
+    }
+  }
+
+  function buildCards(wordsOrUnit) {
     var tray = $('#card-tray');
     if (tray) {
       Array.prototype.slice.call(tray.querySelectorAll('.game-card, .word-card')).forEach(function (node) {
         node.remove();
       });
     }
+    var words = Array.isArray(wordsOrUnit)
+      ? wordsOrUnit
+      : getUnitWords(wordsOrUnit);
     state.cards = [];
-    unit.words.forEach(function (word) {
+    words.forEach(function (word) {
       var card = {
         word: word.word,
         meaning: word.meaning,
@@ -799,15 +1106,9 @@
       if (tray) {
         var button = make('button', 'game-card word-card game-card--image');
         button.type = 'button';
-        button.dataset.cardWord = word.word;
         button.style.setProperty('--word-hue', String(hueFor(word.word)));
-        /* Battle cards show only the picture; the word/meaning stay in the
-           accessible name so screen readers and answer checks still work. */
-        button.setAttribute('aria-label', '图片卡片：' + word.meaning + '（' + word.word + '）');
-        button.innerHTML =
-          '<span class="game-card__emoji game-card__image word-card__emoji" aria-hidden="true">' +
-            escapeHtml(word.emoji) + '</span>';
         card.el = button;
+        renderCardElement(card);
         tray.appendChild(button);
       }
       state.cards.push(card);
@@ -867,27 +1168,41 @@
     }
     state.selectedWord = word;
     updateCardStates();
-    speak(word);
+    if (state.matchMode !== 'en-to-zh') speak(word);
     beep(720, 70);
-    setStatus('已选 “' + word + '”（' + card.meaning + '）。点一个空格子放上去！');
+    if (state.matchMode === 'zh-to-en') {
+      setStatus('已选英语卡片 “' + cardLabelFor(card) + '”。点一个空格子放上去！');
+    } else if (state.matchMode === 'en-to-zh') {
+      setStatus('已选中文卡片 “' + cardLabelFor(card) + '”。点一个空格子放上去！');
+    } else {
+      setStatus('已选 “' + word + '”（' + card.meaning + '）。点一个空格子放上去！');
+    }
   }
 
   /* ------------------------------------------------------------------ */
   /* Game board tokens                                                   */
   /* ------------------------------------------------------------------ */
 
+  function renderEnemyElement(enemy) {
+    if (!enemy || !enemy.el) return;
+    var clue = enemyClueFor(enemy);
+    enemy.el.dataset.word = enemy.word;
+    enemy.el.dataset.clue = clue;
+    enemy.el.dataset.matchMode = state.matchMode;
+    /* Enemies show only the clue language for the current mode. Never render
+       enemy.emoji or the answer language here. */
+    enemy.el.setAttribute('title', '单词敌人：' + clue);
+    enemy.el.setAttribute('aria-label', enemyAriaLabelFor(enemy));
+    enemy.el.innerHTML =
+      '<span class="enemy-token__creature enemy-token__emoji" aria-hidden="true">' + CREATURE_ICON + '</span>' +
+      '<span class="enemy-token__word">' + escapeHtml(clue) + '</span>';
+  }
+
   function syncEnemyElement(enemy) {
     if (!enemy.el) {
       enemy.el = make('div', 'enemy-token');
-      enemy.el.dataset.word = enemy.word;
       enemy.el.style.setProperty('--word-hue', String(hueFor(enemy.word)));
-      /* The token shows only a generic creature + the English word. Never
-         render enemy.emoji or enemy.meaning here: that would give away the
-         picture/word match the player is supposed to solve. */
-      enemy.el.setAttribute('title', '单词敌人：' + enemy.word);
-      enemy.el.innerHTML =
-        '<span class="enemy-token__creature enemy-token__emoji" aria-hidden="true">' + CREATURE_ICON + '</span>' +
-        '<span class="enemy-token__word">' + escapeHtml(enemy.word) + '</span>';
+      renderEnemyElement(enemy);
     }
     var cellIndex = clamp(Math.floor(enemy.pos), 0, CFG.cellsPerLane - 1);
     var cell = getCell(enemy.lane, cellIndex);
@@ -896,18 +1211,34 @@
     enemy.el.style.setProperty('--cell-progress', (enemy.pos - cellIndex).toFixed(2));
   }
 
+  function renderDefenderElement(defender) {
+    if (!defender || !defender.el) return;
+    var label = cardLabelFor(defender);
+    defender.el.dataset.word = defender.word;
+    defender.el.dataset.cardLabel = label;
+    defender.el.dataset.matchMode = state.matchMode;
+    if (state.matchMode === 'classic') {
+      defender.el.removeAttribute('aria-label');
+      defender.el.setAttribute('title', defender.word + ' · ' + defender.meaning);
+      defender.el.innerHTML =
+        '<span class="defender-token__emoji" aria-hidden="true">' + escapeHtml(defender.emoji) + '</span>' +
+        '<span class="defender-token__word">' + escapeHtml(defender.word) + '</span>';
+    } else {
+      defender.el.setAttribute('title', '已放置：' + label);
+      defender.el.setAttribute('aria-label', '已放置：' + label);
+      defender.el.innerHTML =
+        '<span class="defender-token__word">' + escapeHtml(label) + '</span>';
+    }
+  }
+
   function createDefenderElement(defender) {
     var cell = getCell(defender.lane, defender.cell);
     if (!cell) return;
     var node = make('div', 'defender-token');
-    node.dataset.word = defender.word;
     node.style.setProperty('--word-hue', String(hueFor(defender.word)));
-    node.setAttribute('title', defender.word + ' · ' + defender.meaning);
-    node.innerHTML =
-      '<span class="defender-token__emoji" aria-hidden="true">' + escapeHtml(defender.emoji) + '</span>' +
-      '<span class="defender-token__word">' + escapeHtml(defender.word) + '</span>';
     cell.appendChild(node);
     defender.el = node;
+    renderDefenderElement(defender);
   }
 
   function showShot(defender) {
@@ -945,9 +1276,7 @@
   function buildWaveSchedule(unit, rng) {
     var random = typeof rng === 'function' ? rng : Math.random;
     var queue = [];
-    var words = unit && Array.isArray(unit.words)
-      ? unit.words.filter(function (word) { return word && word.word; })
-      : [];
+    var words = Array.isArray(unit) ? getUnitWords({ words: unit }) : getUnitWords(unit);
     if (!words.length) return queue;
 
     var pool = [];
@@ -966,7 +1295,16 @@
 
     var t = 1200;
     var lastLane = -1;
-    var sizes = CFG.waveSizes || [3, 3, 4, 4];
+    var sizes = (CFG.waveSizes || [3, 3, 4, 4]).slice();
+    var baseTotal = sizes.reduce(function (total, size) { return total + size; }, 0);
+    /* Every word must spawn at least once. The first shuffled cycle covers all
+       distinct words, so only wave sizes below the word count need extending. */
+    if (words.length > baseTotal) {
+      var extra = words.length - baseTotal;
+      for (var e = 0; e < extra; e += 1) {
+        sizes[e % sizes.length] += 1;
+      }
+    }
     for (var waveIndex = 0; waveIndex < sizes.length; waveIndex += 1) {
       for (var i = 0; i < sizes[waveIndex]; i += 1) {
         var lane = Math.floor(random() * CFG.lanes);
@@ -988,6 +1326,15 @@
       t += CFG.waveGapMs;
     }
     return queue;
+  }
+
+  /* One battle round: cards and wave schedule share exactly this word pool. */
+  function prepareRound(unit, rng) {
+    var words = pickRoundWords(unit, rng);
+    return {
+      words: words,
+      schedule: buildWaveSchedule({ words: words }, rng)
+    };
   }
 
   /* ------------------------------------------------------------------ */
@@ -1017,9 +1364,16 @@
     later(function () {
       if (defender.el) defender.el.classList.remove('is-stunned');
     }, 1300);
-    setStatus('❌ “' + defender.word + '” 挡不住 “' + target.word + '”，-' +
-      CFG.mismatchPenalty + ' 分。换一张卡片试试！');
-    toast('单词不匹配，-' + CFG.mismatchPenalty + ' 分', 'error');
+    if (state.matchMode === 'classic') {
+      setStatus('❌ “' + defender.word + '” 挡不住 “' + target.word + '”，-' +
+        CFG.mismatchPenalty + ' 分。换一张卡片试试！');
+    } else {
+      setStatus('❌ 这张卡片和 “' + enemyClueFor(target) + '” 对不上，-' +
+        CFG.mismatchPenalty + ' 分。换一张卡片试试！');
+    }
+    toast(state.matchMode === 'classic'
+      ? '单词不匹配，-' + CFG.mismatchPenalty + ' 分'
+      : '配对不正确，-' + CFG.mismatchPenalty + ' 分', 'error');
     beep(170, 170);
     renderHud();
   }
@@ -1028,8 +1382,13 @@
     if (!state.running) { setStatus('先点“开始游戏”吧！'); return; }
     if (!getCell(laneIndex, cellIndex)) return;
     if (!state.selectedWord) {
-      setStatus('先点一张单词卡片，再点格子。');
-      toast('先选一张单词卡片', 'info');
+      if (state.matchMode === 'classic') {
+        setStatus('先点一张单词卡片，再点格子。');
+        toast('先选一张单词卡片', 'info');
+      } else {
+        setStatus('先点一张卡片，再点格子。');
+        toast('先选一张卡片', 'info');
+      }
       return;
     }
     var card = findCard(state.selectedWord);
@@ -1067,7 +1426,12 @@
       applyMismatch(defender, ahead[0]);
     } else if (matched) {
       beep(880, 90);
-      setStatus('✅ “' + defender.word + '” 对上了 ' + matched.emoji + ' ' + matched.word + '！');
+      if (state.matchMode === 'classic') {
+        setStatus('✅ “' + defender.word + '” 对上了 ' + matched.emoji + ' ' + matched.word + '！');
+      } else {
+        setStatus('✅ 配对成功：“' + cardLabelFor(card) + '” ↔ “' +
+          enemyClueFor(matched) + '”！');
+      }
       showScorePop(laneIndex, cellIndex, '✓');
     } else {
       beep(520, 60);
@@ -1094,7 +1458,13 @@
     state.enemies.push(enemy);
     state.wave = Math.max(state.wave, event.wave || 1);
     syncEnemyElement(enemy);
-    setStatus('新的单词敌人：' + enemy.word + '，快找它的图片卡片！');
+    if (state.matchMode === 'zh-to-en') {
+      setStatus('新的单词敌人：' + enemy.meaning + '，快找对应的英语卡片！');
+    } else if (state.matchMode === 'en-to-zh') {
+      setStatus('新的单词敌人：' + enemy.word + '，快找对应的中文卡片！');
+    } else {
+      setStatus('新的单词敌人：' + enemy.word + '，快找它的图片卡片！');
+    }
     beep(330, 60);
     emit('english-kids:spawn', {
       word: enemy.word,
@@ -1115,7 +1485,11 @@
     state.kills += 1;
     state.learned.add(enemy.word);
     showScorePop(enemy.lane, Math.floor(enemy.pos), '+' + gain);
-    setStatus('✅ “' + enemy.word + '” 被挡住了！+' + gain + ' 分');
+    if (state.matchMode === 'classic') {
+      setStatus('✅ “' + enemy.word + '” 被挡住了！+' + gain + ' 分');
+    } else {
+      setStatus('✅ “' + enemyClueFor(enemy) + '” 被挡住了！+' + gain + ' 分');
+    }
     if (state.combo > 0 && state.combo % 3 === 0) {
       toast('🔥 连续挡住 ' + state.combo + ' 个单词敌人！', 'success');
     }
@@ -1139,7 +1513,11 @@
     state.combo = 0;
     flashLane(enemy.lane);
     beep(150, 240);
-    setStatus('😟 “' + enemy.word + '” 到达基地，生命 -1。');
+    if (state.matchMode === 'classic') {
+      setStatus('😟 “' + enemy.word + '” 到达基地，生命 -1。');
+    } else {
+      setStatus('😟 “' + enemyClueFor(enemy) + '” 到达基地，生命 -1。');
+    }
     toast('敌人突破防线，生命 -1', 'error');
     renderHud();
     emit('english-kids:leak', { word: enemy.word, lane: enemy.lane, lives: state.lives });
@@ -1353,6 +1731,7 @@
       if (card.el) card.el.remove();
     });
     state.cards = [];
+    state.activeWords = [];
     var tray = $('#card-tray');
     if (tray) {
       Array.prototype.slice.call(tray.querySelectorAll('.game-card, .word-card')).forEach(function (node) {
@@ -1376,8 +1755,8 @@
       toast('这个单元还没有单词', 'info');
       return;
     }
-    var schedule = buildWaveSchedule(unit);
-    if (!schedule.length) {
+    var round = prepareRound(unit);
+    if (!round.words.length || !round.schedule.length) {
       setStatus('这个单元还没有可玩的单词，等词表导入后再试。');
       toast('没有可玩的单词', 'info');
       return;
@@ -1395,23 +1774,30 @@
     state.wave = 1;
     state.totalWaves = CFG.totalWaves;
     state.elapsed = 0;
-    state.spawnQueue = schedule;
+    state.spawnQueue = round.schedule;
     state.spawnIndex = 0;
     state.combo = 0;
     state.kills = 0;
     state.learned = new Set();
     state.hintsLeft = CFG.hints;
+    state.activeWords = round.words;
 
     ensureBoard();
     clearTokens();
-    buildCards(unit);
+    applyMatchModeUi();
+    buildCards(round.words);
     updateHintButton();
     renderHud();
     showScreen('screen-game');
-    setStatus('把和敌人单词相同的卡片放到同一行，守住右边的基地！点“提示”可以找答案。');
+    setStatus(matchModeInstruction());
     beep(660, 90);
     startLoop();
-    emit('english-kids:start', { unitId: unit.id });
+    emit('english-kids:start', {
+      unitId: unit.id,
+      roundSize: state.roundSize,
+      wordCount: round.words.length,
+      matchMode: state.matchMode
+    });
   }
 
   function finishGame(won) {
@@ -1432,7 +1818,12 @@
     showScreen('screen-result');
     setStatus(won ? '🎉 胜利！你守住了基地！' : '💪 游戏结束，再试一次吧！');
     beep(won ? 1040 : 160, won ? 280 : 420);
-    emit('english-kids:finish', { won: won, score: state.score, bonus: bonus });
+    emit('english-kids:finish', {
+      won: won,
+      score: state.score,
+      bonus: bonus,
+      matchMode: state.matchMode
+    });
   }
 
   function goHome() {
@@ -1469,19 +1860,37 @@
 
     state.hintsLeft -= 1;
     updateHintButton();
-    setStatus('💡 第 ' + (target.lane + 1) + ' 行需要 “' + target.word + '”（' +
-      target.meaning + '）的图片卡片！' +
-      (cardCooling ? ' 卡片正在冷却，稍等一下。' : '') +
-      ' 提示还剩 ' + state.hintsLeft + ' 次。');
-    toast('💡 第 ' + (target.lane + 1) + ' 行需要 “' + target.word + '” 的图片卡片', 'info');
-    speak(target.word);
+    if (state.matchMode === 'zh-to-en') {
+      setStatus('💡 第 ' + (target.lane + 1) + ' 行需要一张表示 “' +
+        target.meaning + '” 的英语卡片！' +
+        (cardCooling ? ' 卡片正在冷却，稍等一下。' : '') +
+        ' 提示还剩 ' + state.hintsLeft + ' 次。');
+      toast('💡 第 ' + (target.lane + 1) + ' 行需要表示 “' + target.meaning +
+        '” 的英语卡片', 'info');
+    } else if (state.matchMode === 'en-to-zh') {
+      setStatus('💡 第 ' + (target.lane + 1) + ' 行需要 “' +
+        target.word + '” 的中文卡片！' +
+        (cardCooling ? ' 卡片正在冷却，稍等一下。' : '') +
+        ' 提示还剩 ' + state.hintsLeft + ' 次。');
+      toast('💡 第 ' + (target.lane + 1) + ' 行需要 “' + target.word +
+        '” 的中文卡片', 'info');
+      speak(target.word);
+    } else {
+      setStatus('💡 第 ' + (target.lane + 1) + ' 行需要 “' + target.word + '”（' +
+        target.meaning + '）的图片卡片！' +
+        (cardCooling ? ' 卡片正在冷却，稍等一下。' : '') +
+        ' 提示还剩 ' + state.hintsLeft + ' 次。');
+      toast('💡 第 ' + (target.lane + 1) + ' 行需要 “' + target.word + '” 的图片卡片', 'info');
+      speak(target.word);
+    }
     beep(820, 70);
 
     later(clearHighlights, state.reducedMotion ? 700 : 2400);
     emit('english-kids:hint', {
       word: target.word,
       lane: target.lane,
-      hintsLeft: state.hintsLeft
+      hintsLeft: state.hintsLeft,
+      matchMode: state.matchMode
     });
   }
 
@@ -1533,6 +1942,10 @@
         selectBook(actionEl.dataset.bookId || actionEl.dataset.book);
       } else if (action === 'select-unit') {
         openPreview(actionEl.dataset.unitId || actionEl.dataset.unit || state.unitId);
+      } else if (action === 'select-round-size') {
+        selectRoundSize(actionEl.dataset.roundSize || actionEl.dataset.size);
+      } else if (action === 'select-match-mode') {
+        selectMatchMode(actionEl.dataset.matchMode || actionEl.dataset.mode);
       } else if (action === 'start-game') {
         var startUnitId = actionEl.dataset.unitId || state.unitId;
         if (!startUnitId && state.bookId) {
@@ -1630,6 +2043,8 @@
   function init() {
     if (state.initialized || !root.document) return;
     state.initialized = true;
+    loadRoundSize();
+    loadMatchMode();
     state.speechAvailable = !!(root.speechSynthesis &&
       typeof root.SpeechSynthesisUtterance === 'function');
 
@@ -1650,6 +2065,8 @@
     ensureBoard();
     bindEvents();
     renderHome();
+    updateRoundSizeControls();
+    updateMatchModeControls();
     updateSoundButton();
     updateHintButton();
     renderHud();
@@ -1675,6 +2092,11 @@
     toggleSound: toggleSound,
     showScreen: showScreen,
     buildWaveSchedule: buildWaveSchedule,
+    prepareRound: prepareRound,
+    selectRoundSize: selectRoundSize,
+    selectMatchMode: selectMatchMode,
+    cardLabelFor: cardLabelFor,
+    enemyClueFor: enemyClueFor,
     hueFor: hueFor,
     getState: function () {
       return {
@@ -1686,6 +2108,10 @@
         bookId: state.bookId,
         unitId: state.unitId,
         wordCount: state.unit ? Data.getWordCount(state.unit) : 0,
+        roundSize: state.roundSize,
+        matchMode: state.matchMode,
+        roundWordCount: state.activeWords.length,
+        roundWords: state.activeWords.map(function (word) { return word.word; }),
         contentEmpty: !Data.hasVocabulary(),
         score: state.score,
         lives: state.lives,
