@@ -165,6 +165,34 @@
       </fieldset>
       <p id="round-size-hint" class="round-size__hint">本局随机抽取这些词，敌人只考这组词。</p>
 
+      <!-- 怪物出现速度（进度条滑杆）：hooks #game-pace-group / #game-pace-input /
+           #game-pace-value / #game-pace-hint，数值由 game.js 读写 -->
+      <fieldset id="game-pace-group" class="game-pace">
+        <legend class="game-pace__legend">怪物出现速度</legend>
+        <div class="game-pace__row">
+          <span class="game-pace__edge" aria-hidden="true">🐢 慢</span>
+          <input type="range" id="game-pace-input" class="game-pace__slider"
+                 min="50" max="100" step="5" value="60"
+                 aria-label="怪物出现速度百分比，数字越小越慢"
+                 aria-describedby="game-pace-hint">
+          <span class="game-pace__edge" aria-hidden="true">快 🐇</span>
+          <output id="game-pace-value" class="game-pace__value" for="game-pace-input">60%</output>
+        </div>
+        <p id="game-pace-hint" class="game-pace__hint">往左拖更慢：怪物出现和移动都变慢，小朋友有更多时间反应。</p>
+      </fieldset>
+
+      <!-- 本局单词预告：#round-word-preview-list 由 game.js 填充（英文 + 中文），
+           初始为空、禁止写死单词；#round-word-preview-count 显示本局词数 -->
+      <section id="round-word-preview" class="word-preview" aria-labelledby="round-word-preview-title">
+        <div class="word-preview__head">
+          <h3 id="round-word-preview-title" class="word-preview__title">🎯 本局会遇到的单词</h3>
+          <span id="round-word-preview-count" class="word-preview__count">6 词</span>
+        </div>
+        <p class="word-preview__hint">下面就是本局随机抽到的单词，先读一读、记一记，进战场就不慌啦。</p>
+        <ol id="round-word-preview-list" class="word-preview__list"></ol>
+        <p id="round-word-preview-empty" class="word-preview__empty">选好词数后，这里会列出本局要考的单词。</p>
+      </section>
+
       <div class="preview__footer preview-actions">
         <!-- data-action="start-game" → 进入对战 -->
         <button type="button" id="btn-enter-battle" class="btn btn--primary btn--xl" data-action="start-game">

@@ -21,6 +21,13 @@
   var MATCH_MODE_DEFAULT = 'classic';
   var MATCH_MODE_STORAGE_KEY = 'english-kids:match-mode';
   var MATCH_MODES = ['classic', 'zh-to-en', 'en-to-zh'];
+  /* Pace is a multiplier: 0.5 is the slowest supported speed, 1 is the
+     original speed. The range input exposes it as 50–100 in steps of 5. */
+  var GAME_PACE_DEFAULT = 0.6;
+  var GAME_PACE_MIN = 0.5;
+  var GAME_PACE_MAX = 1;
+  var GAME_PACE_STEP = 0.05;
+  var GAME_PACE_STORAGE_KEY = 'english-kids:game-pace';
   var state = {
     unit: null,
     unitId: null,
@@ -51,7 +58,11 @@
     learned: new Set(),
     roundSize: ROUND_SIZE_DEFAULT,
     matchMode: MATCH_MODE_DEFAULT,
+    gamePace: GAME_PACE_DEFAULT,
+    roundPace: GAME_PACE_DEFAULT,
     activeWords: [],
+    roundPool: [],
+    roundPoolKey: null,
     loopId: null,
     lastFrame: 0,
     reducedMotion: false,
@@ -167,6 +178,40 @@
     } catch (err) { /* storage is optional */ }
   }
 
+  /* Accept either a multiplier (0.5–1) or a percentage (50–100), clamp it to
+     the supported range, and snap it to the slider's 5% steps. */
+  function normalizeGamePace(value) {
+    var numeric = typeof value === 'number' ? value : parseFloat(value);
+    if (!isFinite(numeric)) return null;
+    if (numeric >= 10) numeric = numeric / 100;
+    var percent = clamp(Math.round(numeric * 100), GAME_PACE_MIN * 100, GAME_PACE_MAX * 100);
+    percent = Math.round(percent / (GAME_PACE_STEP * 100)) * (GAME_PACE_STEP * 100);
+    return percent / 100;
+  }
+
+  function loadGamePace() {
+    try {
+      var stored = root.localStorage && root.localStorage.getItem(GAME_PACE_STORAGE_KEY);
+      var pace = normalizeGamePace(stored);
+      if (pace != null) state.gamePace = pace;
+      else state.gamePace = GAME_PACE_DEFAULT;
+    } catch (err) {
+      state.gamePace = GAME_PACE_DEFAULT;
+    }
+    if (state.gamePace < GAME_PACE_MIN || state.gamePace > GAME_PACE_MAX) {
+      state.gamePace = GAME_PACE_DEFAULT;
+    }
+    return state.gamePace;
+  }
+
+  function saveGamePace(pace) {
+    try {
+      if (root.localStorage) {
+        root.localStorage.setItem(GAME_PACE_STORAGE_KEY, String(pace));
+      }
+    } catch (err) { /* storage is optional */ }
+  }
+
   /* Canonical identity always stays word.word / word.meaning. These helpers
      only choose which language is visible for the current mode. */
   function cardLabelFor(word) {
@@ -238,6 +283,25 @@
     var random = typeof rng === 'function' ? rng : Math.random;
     var size = Math.min(state.roundSize, words.length);
     return Data.shuffle(words, random).slice(0, size);
+  }
+
+  /* The preview pool is sampled once per unit + round size, so changing match
+     mode or pace never reshuffles the words the player is preparing for. */
+  function roundPoolKeyFor(unit) {
+    if (!unit) return null;
+    return String(unit.id || '') + '::' + state.roundSize;
+  }
+
+  function sampleRoundPool(unit, rng) {
+    state.roundPool = pickRoundWords(unit, rng);
+    state.roundPoolKey = roundPoolKeyFor(unit);
+    return state.roundPool;
+  }
+
+  function ensureRoundPool(unit, force, rng) {
+    var key = roundPoolKeyFor(unit);
+    if (force || state.roundPoolKey !== key) return sampleRoundPool(unit, rng);
+    return state.roundPool;
   }
 
   var HTML_ESCAPES = {
@@ -771,6 +835,29 @@
     else openUnitsScreen();
   }
 
+  function renderRoundWordPreview() {
+    var list = $('#round-word-preview-list');
+    var countNode = $('#round-word-preview-count');
+    var words = Array.isArray(state.roundPool) ? state.roundPool : [];
+    if (countNode) {
+      countNode.dataset.count = String(words.length);
+      var countText = '本关 ' + words.length + ' 个单词';
+      if (countNode.textContent !== countText) countNode.textContent = countText;
+    }
+    if (!list) return;
+    list.innerHTML = '';
+    var asListItems = list.tagName === 'UL' || list.tagName === 'OL';
+    words.forEach(function (word) {
+      var item = make(asListItems ? 'li' : 'div', 'round-word-preview__item');
+      item.dataset.word = word.word;
+      item.setAttribute('aria-label', word.word + '，' + word.meaning);
+      item.innerHTML =
+        '<span class="round-word-preview__word">' + escapeHtml(word.word) + '</span>' +
+        '<span class="round-word-preview__meaning">' + escapeHtml(word.meaning) + '</span>';
+      list.appendChild(item);
+    });
+  }
+
   function renderPreview(unit) {
     var list = $('#preview-list');
     if (!list) return;
@@ -844,10 +931,10 @@
       text = '这个单元还没有单词，暂时不能选择每关单词数量。';
     } else if (state.roundSize > available) {
       text = '本单元只有 ' + available + ' 个单词，这一关会全部用上（' + effective +
-        ' 个），每次开始都会重新抽取。';
+        ' 个）。下方预告就是本局词表；切换单元或词数会重新抽取。';
     } else {
       text = '每关从本单元 ' + available + ' 个单词里随机选 ' + effective +
-        ' 个，卡片和敌人都是这 ' + effective + ' 个，每次开始重新抽选。';
+        ' 个，卡片和敌人都是这 ' + effective + ' 个。下方预告就是本局词表；切换单元或词数会重新抽取。';
     }
     if (node.textContent !== text) node.textContent = text;
   }
@@ -881,6 +968,10 @@
     }
     state.roundSize = size;
     saveRoundSize(size);
+    if (state.unit) {
+      ensureRoundPool(state.unit, true);
+      renderRoundWordPreview();
+    }
     updateRoundSizeControls(state.unit);
 
     var available = getUnitWords(state.unit).length;
@@ -890,7 +981,7 @@
       setStatus('已选择每关 ' + size + ' 个单词；本单元只有 ' + available +
         ' 个，这一关会全部用上。');
     } else {
-      setStatus('已选择每关 ' + size + ' 个单词，开始游戏后会随机抽选。');
+      setStatus('已重新抽取本局词组，请查看下方单词预告。');
     }
     beep(700, 60);
     emit('english-kids:select-round-size', {
@@ -958,6 +1049,45 @@
       var text = matchModeHintText();
       if (hint.textContent !== text) hint.textContent = text;
     }
+  }
+
+  function updateGamePaceControls() {
+    var percent = Math.round(state.gamePace * 100);
+    var input = root.document ? root.document.getElementById('game-pace-input') : null;
+    if (input) {
+      input.min = String(GAME_PACE_MIN * 100);
+      input.max = String(GAME_PACE_MAX * 100);
+      input.step = String(GAME_PACE_STEP * 100);
+      if (String(input.value) !== String(percent)) input.value = String(percent);
+      input.setAttribute('aria-valuetext', percent + '%');
+    }
+    setText('#game-pace-value', percent + '%');
+  }
+
+  function selectGamePace(value) {
+    var pace = normalizeGamePace(value);
+    if (pace == null) {
+      updateGamePaceControls();
+      return state.gamePace;
+    }
+    var changed = pace !== state.gamePace;
+    state.gamePace = pace;
+    saveGamePace(pace);
+    updateGamePaceControls();
+    if (changed) {
+      setStatus('怪物速度：' + Math.round(pace * 100) + '%。开始新一关后生效。');
+      emit('english-kids:select-game-pace', {
+        pace: pace,
+        percent: Math.round(pace * 100)
+      });
+    }
+    return pace;
+  }
+
+  function handleGamePaceInput(event) {
+    var target = event.target;
+    if (!target || target.id !== 'game-pace-input') return;
+    selectGamePace(target.value);
   }
 
   function refreshMatchModePresentation() {
@@ -1045,8 +1175,10 @@
     state.unitId = unit.id;
     state.lastUnitId = unit.id;
     var count = Data.getWordCount(unit);
+    ensureRoundPool(unit);
     ensurePreviewControls();
     renderPreview(unit);
+    renderRoundWordPreview();
     updateMatchModeControls();
     showScreen('screen-preview');
     setStatus(count
@@ -1273,8 +1405,10 @@
   /* Wave schedule (pure; exported for validation)                       */
   /* ------------------------------------------------------------------ */
 
-  function buildWaveSchedule(unit, rng) {
+  function buildWaveSchedule(unit, rng, pace) {
     var random = typeof rng === 'function' ? rng : Math.random;
+    var speed = normalizeGamePace(pace == null ? state.gamePace : pace);
+    if (speed == null) speed = GAME_PACE_DEFAULT;
     var queue = [];
     var words = Array.isArray(unit) ? getUnitWords({ words: unit }) : getUnitWords(unit);
     if (!words.length) return queue;
@@ -1293,7 +1427,7 @@
       return picked;
     }
 
-    var t = 1200;
+    var t = Math.round(1200 / speed);
     var lastLane = -1;
     var sizes = (CFG.waveSizes || [3, 3, 4, 4]).slice();
     var baseTotal = sizes.reduce(function (total, size) { return total + size; }, 0);
@@ -1321,19 +1455,19 @@
           meaning: word.meaning,
           emoji: word.emoji
         });
-        t += CFG.spawnGapMs + Math.floor(random() * CFG.spawnJitterMs);
+        t += Math.round((CFG.spawnGapMs + Math.floor(random() * CFG.spawnJitterMs)) / speed);
       }
-      t += CFG.waveGapMs;
+      t += Math.round(CFG.waveGapMs / speed);
     }
     return queue;
   }
 
   /* One battle round: cards and wave schedule share exactly this word pool. */
-  function prepareRound(unit, rng) {
-    var words = pickRoundWords(unit, rng);
+  function prepareRound(unit, rng, pace) {
+    var words = ensureRoundPool(unit, false, rng);
     return {
       words: words,
-      schedule: buildWaveSchedule({ words: words }, rng)
+      schedule: buildWaveSchedule({ words: words }, rng, pace)
     };
   }
 
@@ -1529,10 +1663,18 @@
     killEnemy(target, defender);
   }
 
+  /* Enemy travel speed in cells per second for a pace multiplier. */
+  function enemySpeedFor(pace) {
+    var speed = normalizeGamePace(pace == null ? state.roundPace : pace);
+    if (speed == null) speed = GAME_PACE_DEFAULT;
+    return CFG.enemySpeed * speed;
+  }
+
   function updateEnemies(dt) {
+    var step = enemySpeedFor(state.roundPace) * dt;
     for (var i = state.enemies.length - 1; i >= 0; i -= 1) {
       var enemy = state.enemies[i];
-      enemy.pos += CFG.enemySpeed * dt;
+      enemy.pos += step;
       if (enemy.pos >= CFG.cellsPerLane) {
         leakEnemy(enemy);
         if (!state.running) return;
@@ -1755,7 +1897,7 @@
       toast('这个单元还没有单词', 'info');
       return;
     }
-    var round = prepareRound(unit);
+    var round = prepareRound(unit, null, state.gamePace);
     if (!round.words.length || !round.schedule.length) {
       setStatus('这个单元还没有可玩的单词，等词表导入后再试。');
       toast('没有可玩的单词', 'info');
@@ -1766,6 +1908,7 @@
     state.unit = unit;
     state.unitId = unit.id;
     state.lastUnitId = unit.id;
+    state.roundPace = state.gamePace;
     state.running = true;
     state.paused = false;
     state.finished = false;
@@ -1796,7 +1939,8 @@
       unitId: unit.id,
       roundSize: state.roundSize,
       wordCount: round.words.length,
-      matchMode: state.matchMode
+      matchMode: state.matchMode,
+      pace: state.roundPace
     });
   }
 
@@ -1977,7 +2121,7 @@
     var cardEl = target.closest('#card-tray [data-card-word]');
     if (cardEl) { selectCard(cardEl.dataset.cardWord); return; }
 
-    var previewEl = target.closest('#preview-list [data-word]');
+    var previewEl = target.closest('#preview-list [data-word], #round-word-preview-list [data-word]');
     if (previewEl) {
       speak(previewEl.dataset.word);
       setStatus('🔈 跟读：“' + previewEl.dataset.word + '”');
@@ -2034,6 +2178,8 @@
     root.document.addEventListener('dragstart', handleDragStart);
     root.document.addEventListener('dragover', handleDragOver);
     root.document.addEventListener('drop', handleDrop);
+    root.document.addEventListener('input', handleGamePaceInput);
+    root.document.addEventListener('change', handleGamePaceInput);
   }
 
   /* ------------------------------------------------------------------ */
@@ -2045,6 +2191,7 @@
     state.initialized = true;
     loadRoundSize();
     loadMatchMode();
+    loadGamePace();
     state.speechAvailable = !!(root.speechSynthesis &&
       typeof root.SpeechSynthesisUtterance === 'function');
 
@@ -2067,6 +2214,7 @@
     renderHome();
     updateRoundSizeControls();
     updateMatchModeControls();
+    updateGamePaceControls();
     updateSoundButton();
     updateHintButton();
     renderHud();
@@ -2093,8 +2241,13 @@
     showScreen: showScreen,
     buildWaveSchedule: buildWaveSchedule,
     prepareRound: prepareRound,
+    enemySpeedFor: enemySpeedFor,
+    renderRoundWordPreview: renderRoundWordPreview,
     selectRoundSize: selectRoundSize,
     selectMatchMode: selectMatchMode,
+    selectGamePace: selectGamePace,
+    loadGamePace: loadGamePace,
+    normalizeGamePace: normalizeGamePace,
     cardLabelFor: cardLabelFor,
     enemyClueFor: enemyClueFor,
     hueFor: hueFor,
@@ -2110,6 +2263,8 @@
         wordCount: state.unit ? Data.getWordCount(state.unit) : 0,
         roundSize: state.roundSize,
         matchMode: state.matchMode,
+        gamePace: state.gamePace,
+        roundPace: state.roundPace,
         roundWordCount: state.activeWords.length,
         roundWords: state.activeWords.map(function (word) { return word.word; }),
         contentEmpty: !Data.hasVocabulary(),

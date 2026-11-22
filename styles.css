@@ -9,6 +9,10 @@
      #screen-preview / #screen-game（结算 #modal-result、暂停 #modal-pause）
    容器（JS 渲染，静态留空）：.book-filter 胶囊、#unit-grid 单元、
      #preview-list 单词卡、#card-tray 图片卡、.lane__track 每路 8 格
+     预习页控件（HTML 静态 + game.js 读写）：#game-pace-input 速度滑杆（50–100、
+       步进 5、默认 60，数字越小越慢）→ #game-pace-value 百分比读数；
+       #round-word-preview-list 本局单词列表（JS 填 <li>，为空时显示
+       #round-word-preview-empty）→ #round-word-preview-count 词数徽章
    状态：#hud-score #hud-wave #hud-hearts #status-message #battle-toast
      （回退 #tray-hint）
    战场：#battlefield + #lane-1..#lane-4 + [data-cell] 格子
@@ -1025,6 +1029,243 @@ button {
   color: #d7d1ff;
 }
 
+/* ---- 怪物出现速度（进度条滑杆）
+       hooks：#game-pace-group / #game-pace-input / #game-pace-value / #game-pace-hint
+       数值 50–100（步进 5，默认 60），数字越小 = 怪物出现与移动越慢 ---- */
+.game-pace {
+  margin: 0;
+  padding: 8px 14px 12px;
+  border: 2px dashed rgba(255, 249, 236, 0.45);
+  border-radius: var(--r-md);
+  background: rgba(22, 16, 54, 0.55);
+}
+
+.game-pace__legend {
+  padding: 0 6px;
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #efeaff;
+}
+
+.game-pace__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+.game-pace__edge {
+  flex: none;
+  font-size: 0.82rem;
+  color: #d7d1ff;
+  white-space: nowrap;
+}
+
+/* 数值读数（百分比徽章） */
+.game-pace__value {
+  flex: none;
+  display: inline-block;
+  min-width: 62px;
+  margin-left: auto;
+  padding: 4px 10px;
+  border: var(--bw) solid var(--line);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffe27a, var(--sun));
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-align: center;
+  box-shadow: var(--shadow-hard);
+}
+
+/* 进度条滑杆（触控高度 44px+，轨道像一条进度条） */
+.game-pace__slider {
+  flex: 1 1 150px;
+  min-width: 120px;
+  height: var(--tap);
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.game-pace__slider:focus-visible {
+  outline: 3px solid var(--sky-blue);
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+
+.game-pace__slider::-webkit-slider-runnable-track {
+  box-sizing: border-box;
+  height: 16px;
+  border: var(--bw) solid var(--line);
+  border-radius: 999px;
+  background:
+    repeating-linear-gradient(90deg,
+      rgba(22, 16, 54, 0.28) 0 2px,
+      transparent 2px 10%),
+    linear-gradient(180deg, #efeaff, #cfc7ff);
+  box-shadow: inset 0 2px 0 rgba(10, 6, 34, 0.28);
+}
+
+.game-pace__slider::-moz-range-track {
+  box-sizing: border-box;
+  height: 16px;
+  border: var(--bw) solid var(--line);
+  border-radius: 999px;
+  background:
+    repeating-linear-gradient(90deg,
+      rgba(22, 16, 54, 0.28) 0 2px,
+      transparent 2px 10%),
+    linear-gradient(180deg, #efeaff, #cfc7ff);
+  box-shadow: inset 0 2px 0 rgba(10, 6, 34, 0.28);
+}
+
+.game-pace__slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  width: 30px;
+  height: 30px;
+  margin-top: -7px;              /* 轨道 16px 居中：(16 - 30) / 2 */
+  border: var(--bw) solid var(--line);
+  border-radius: 50%;
+  background: linear-gradient(180deg, #ffe27a, var(--sun));
+  box-shadow: 0 3px 0 var(--ink);
+  transition: transform 0.12s ease;
+}
+
+.game-pace__slider::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 30px;
+  height: 30px;
+  border: var(--bw) solid var(--line);
+  border-radius: 50%;
+  background: linear-gradient(180deg, #ffe27a, var(--sun));
+  box-shadow: 0 3px 0 var(--ink);
+  transition: transform 0.12s ease;
+}
+
+.game-pace__slider:active::-webkit-slider-thumb { transform: scale(1.1); }
+.game-pace__slider:active::-moz-range-thumb { transform: scale(1.1); }
+
+.game-pace__hint {
+  margin: 4px 2px 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: #d7d1ff;
+}
+
+/* ---- 本局单词预告（game.js 填充 #round-word-preview-list：英文 + 中文）
+       hooks：#round-word-preview / #round-word-preview-list /
+              #round-word-preview-count / #round-word-preview-empty ---- */
+.word-preview {
+  margin: 0;
+  padding: 10px 12px 12px;
+  border: 2px dashed rgba(255, 249, 236, 0.45);
+  border-radius: var(--r-md);
+  background: rgba(22, 16, 54, 0.55);
+}
+
+.word-preview__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.word-preview__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #efeaff;
+}
+
+.word-preview__count {
+  flex: none;
+  padding: 3px 10px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  background: var(--sky-blue);
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.word-preview__hint {
+  margin: 6px 2px 8px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: #d7d1ff;
+}
+
+.word-preview__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: round-word;
+}
+
+.word-preview__list > li {
+  counter-increment: round-word;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 7px 12px;
+  border: var(--bw) solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  box-shadow: 0 3px 0 var(--ink);
+}
+
+/* 序号圆点：帮小朋友按顺序记词 */
+.word-preview__list > li::before {
+  content: counter(round-word);
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--grape);
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+/* 列表为空时显示占位说明；game.js 填入 <li> 后自动隐藏（纯 CSS，无需 JS 配合） */
+.word-preview__list:not(:empty) + .word-preview__empty {
+  display: none;
+}
+
+.word-preview__empty {
+  margin: 0;
+  padding: 12px 14px;
+  border: 2px dashed rgba(255, 249, 236, 0.4);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: #d7d1ff;
+}
+
 /* ---- 匹配模式的对战卡片（game.js 在 #screen-game 上写 data-match-mode，
        并给卡片写 data-card-label 作为显示文本；data-card-word 仍是权威值） ----
    翻译模式（汉译英 / 英译汉）：卡片纯文字——隐藏图片，只显示标签语言 ---- */
@@ -1705,6 +1946,17 @@ button {
 
   .enemy-token__word,
   .defender-token__word { font-size: 0.6rem; padding: 1px 4px; }
+
+  /* 预习页新增：速度滑杆 + 单词预告在窄屏上更紧凑 */
+  .game-pace { padding: 8px 10px 10px; }
+  .game-pace__row { gap: 6px 8px; }
+  .game-pace__edge { font-size: 0.78rem; }
+  .game-pace__slider { flex: 1 1 130px; min-width: 110px; }
+  .game-pace__value { min-width: 56px; padding: 4px 8px; font-size: 0.9rem; }
+
+  .word-preview { padding: 8px 10px 10px; }
+  .word-preview__hint { margin: 5px 2px 7px; }
+  .word-preview__list > li { padding: 6px 10px; font-size: 0.9rem; }
 }
 
 /* 横屏手机：把四条路 + 卡槽排得更舒展 */
