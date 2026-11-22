@@ -178,7 +178,7 @@
     } catch (err) { /* storage is optional */ }
   }
 
-  /* Accept either a multiplier (0.5–1) or a percentage (50–100), clamp it to
+  /* Accept either a multiplier (0.2–1) or a percentage (20–100), clamp it to
      the supported range, and snap it to the slider's 5% steps. */
   function normalizeGamePace(value) {
     var numeric = typeof value === 'number' ? value : parseFloat(value);
@@ -1198,11 +1198,17 @@
   function renderCardElement(card) {
     if (!card || !card.el) return;
     var button = card.el;
+    var label = cardLabelFor(card);
     /* data-card-word is canonical English identity; data-card-label is only
-       the visible language for the selected match mode. */
+       the visible language for the selected match mode. The label-length
+       hints let CSS keep short words on one line and shrink long ones. */
     button.dataset.cardWord = card.word;
-    button.dataset.cardLabel = cardLabelFor(card);
+    button.dataset.cardLabel = label;
     button.dataset.matchMode = state.matchMode;
+    button.dataset.labelLength = String(label.length);
+    button.dataset.labelLang = state.matchMode === 'en-to-zh' ? 'zh' : 'en';
+    button.dataset.labelTier = label.length >= 13 ? 'long' : 'short';
+    button.style.setProperty('--label-len', String(label.length));
     button.setAttribute('aria-label', cardAriaLabelFor(card));
     if (state.matchMode === 'classic') {
       button.innerHTML =

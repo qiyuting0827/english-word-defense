@@ -9,8 +9,8 @@
      #screen-preview / #screen-game（结算 #modal-result、暂停 #modal-pause）
    容器（JS 渲染，静态留空）：.book-filter 胶囊、#unit-grid 单元、
      #preview-list 单词卡、#card-tray 图片卡、.lane__track 每路 8 格
-     预习页控件（HTML 静态 + game.js 读写）：#game-pace-input 速度滑杆（50–100、
-       步进 5、默认 60，数字越小越慢）→ #game-pace-value 百分比读数；
+      预习页控件（HTML 静态 + game.js 读写）：#game-pace-input 速度滑杆（20–100、
+        步进 5、默认 40，数字越小越慢）→ #game-pace-value 百分比读数；
        #round-word-preview-list 本局单词列表（JS 填 <li>，为空时显示
        #round-word-preview-empty）→ #round-word-preview-count 词数徽章
    状态：#hud-score #hud-wave #hud-hearts #status-message #battle-toast
@@ -46,6 +46,11 @@
   --tap: 48px;               /* 最小触控高度 */
   --gap: clamp(8px, 2vw, 16px);
   --pad: clamp(14px, 4vw, 28px);
+
+  /* 对战卡片文字标签：按字符数平滑缩放的上下限与预算 */
+  --label-font-min: 9.2px;   /* 可读下限：低于此值宁可换成两行 */
+  --label-font-max: 13.4px;  /* 短词字号上限 */
+  --label-font-budget: 116px;/* 预算 ≈ 卡内可用宽度 ÷ 单字宽 */
 
   /* ---- 字体（不依赖网络字体，优先圆润系统字） ---- */
   --font-display: "Baloo 2", "PingFang SC", "Hiragino Sans GB",
@@ -1031,7 +1036,7 @@ button {
 
 /* ---- 怪物出现速度（进度条滑杆）
        hooks：#game-pace-group / #game-pace-input / #game-pace-value / #game-pace-hint
-       数值 50–100（步进 5，默认 60），数字越小 = 怪物出现与移动越慢 ---- */
+       数值 20–100（步进 5，默认 40），数字越小 = 怪物出现与移动越慢 ---- */
 .game-pace {
   margin: 0;
   padding: 8px 14px 12px;
@@ -1274,12 +1279,11 @@ button {
   display: none;
 }
 
+/* 翻译模式只切换显示语言；字号、换行等行为统一由下方 .game-card::after
+   的“按长度缩放”规则负责，避免两处 font-size 互相覆盖。 */
 #screen-game[data-match-mode="zh-to-en"] .game-card::after,
 #screen-game[data-match-mode="en-to-zh"] .game-card::after {
   content: attr(data-card-label);
-  font-size: clamp(0.8rem, 3.4vw, 0.95rem);
-  line-height: 1.25;
-  letter-spacing: 0.02em;
 }
 
 /* 若将来注入真实 .game-card__word 文本节点，翻译模式同样抑制 ::after */
@@ -1725,22 +1729,66 @@ button {
   overflow-wrap: break-word;
 }
 
-/* 当前注入结构只有 emoji：把 data-card-word 的英文词显示在图片下方 */
+/* 当前注入结构只有 emoji：把 data-card-word 的英文词显示在图片下方。
+   字号随 data-label-length / --label-len 平滑缩小：短词保持大字号，
+   长词逐步收紧，但始终不低于 --label-font-min（可读下限）。 */
 .game-card::after {
   content: attr(data-card-word);
   font-family: var(--font-display);
-  font-size: clamp(0.72rem, 2.9vw, 0.85rem);
+  font-size: clamp(var(--label-font-min),
+                   calc(var(--label-font-budget) / var(--label-len, 8)),
+                   var(--label-font-max));
   font-weight: 700;
-  line-height: 1.12;
+  line-height: 1.18;
+  letter-spacing: 0;
+  hyphens: none;
+  white-space: nowrap;          /* 常规：一个单词/词组尽量占一行 */
+  overflow-wrap: normal;        /* 不在单词中间硬拆 */
   color: var(--ink);
   text-align: center;
   max-width: 100%;
-  overflow-wrap: break-word;
 }
 
 /* 若 JS 将来提供真实 .game-card__word，抑制 ::after 防止重复显示 */
 .game-card:has(.game-card__word)::after {
   content: none;
+}
+
+/* ---- 长标签排版（game.js 写入 data-label-length / data-label-tier /
+        data-label-lang，不写死任何具体单词） ----
+   1) 卡槽略加宽：让常见长度（≤12 字符）的英文词能完整落在同一行；
+      6/10/15 词都沿用同一套网格，窄屏仍可内部滚动。 */
+#screen-game .tray {
+  grid-template-columns: repeat(auto-fill, minmax(82px, 1fr));
+}
+
+#screen-game .game-card {
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+/* 2) 超长标签（tier=long）才允许换行，并用 balance 把两行配平，
+      避免“一个词被拆成两行”的观感；换行优先发生在空格处。 */
+#screen-game[data-match-mode] .game-card[data-label-tier="long"]::after {
+  white-space: normal;
+  overflow-wrap: break-word;
+  text-wrap: balance;
+}
+
+/* 3) 中文释义：按字符数同样缩放，但允许自然断行并配平（1～3 行）。 */
+#screen-game[data-match-mode] .game-card[data-label-lang="zh"]::after {
+  white-space: normal;
+  overflow-wrap: break-word;   /* CJK 自然断行；拉丁片段仅在放不下时才拆 */
+  text-wrap: balance;
+  line-height: 1.15;
+  font-size: clamp(9.6px,
+                   calc(96px / var(--label-len, 8)),
+                   12.8px);
+}
+
+/* 4) 经典模式：长词换行时把 emoji 收小一点，给文字留出高度。 */
+#screen-game[data-match-mode="classic"] .game-card[data-label-tier="long"] .game-card__emoji {
+  font-size: clamp(0.95rem, 3.4vw, 1.15rem);
 }
 
 /* 选中态（game.js 同步 data-state + aria-pressed + .is-selected） */
