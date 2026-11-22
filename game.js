@@ -27,7 +27,7 @@
   var GAME_PACE_MIN = 0.2;
   var GAME_PACE_MAX = 1;
   var GAME_PACE_STEP = 0.05;
-  var GAME_PACE_STORAGE_KEY = 'english-kids:game-pace';
+  var GAME_PACE_STORAGE_KEY = 'english-kids:game-pace:v2';
   var state = {
     unit: null,
     unitId: null,

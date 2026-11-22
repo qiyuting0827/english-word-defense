@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 
 const MODULE = path.join(__dirname, 'game.js');
-const PACE_KEY = 'english-kids:game-pace';
+const PACE_KEY = 'english-kids:game-pace:v2';
 
 const ORIGINALS = {
   document: globalThis.document,

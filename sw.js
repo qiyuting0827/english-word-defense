@@ -6,7 +6,7 @@
    ========================================================= */
 
 const CACHE_PREFIX = 'word-defense-';
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const CACHE_NAME = `${CACHE_PREFIX}${CACHE_VERSION}`;
 
 // 相对路径以 sw.js 的 URL 为基准解析，因此子路径部署同样有效。
