@@ -21,10 +21,10 @@
   var MATCH_MODE_DEFAULT = 'classic';
   var MATCH_MODE_STORAGE_KEY = 'english-kids:match-mode';
   var MATCH_MODES = ['classic', 'zh-to-en', 'en-to-zh'];
-  /* Pace is a multiplier: 0.5 is the slowest supported speed, 1 is the
-     original speed. The range input exposes it as 50–100 in steps of 5. */
-  var GAME_PACE_DEFAULT = 0.6;
-  var GAME_PACE_MIN = 0.5;
+  /* Pace is a multiplier: 0.2 is the slowest supported speed, 1 is the
+     original speed. The range input exposes it as 20–100 in steps of 5. */
+  var GAME_PACE_DEFAULT = 0.4;
+  var GAME_PACE_MIN = 0.2;
   var GAME_PACE_MAX = 1;
   var GAME_PACE_STEP = 0.05;
   var GAME_PACE_STORAGE_KEY = 'english-kids:game-pace';

@@ -71,21 +71,23 @@ function wordSet(items) {
   return new Set(items.map((item) => item.word || item));
 }
 
-test('pace normalizes percentages and clamps to the 50–100 range', () => {
+test('pace normalizes percentages and clamps to the 20–100 range', () => {
   const { api } = freshGame();
 
   assert.equal(api.normalizeGamePace(0.6), 0.6);
+  assert.equal(api.normalizeGamePace('20'), 0.2);
+  assert.equal(api.normalizeGamePace('25'), 0.25);
   assert.equal(api.normalizeGamePace('50'), 0.5);
   assert.equal(api.normalizeGamePace('100'), 1);
   assert.equal(api.normalizeGamePace('85'), 0.85);
-  assert.equal(api.normalizeGamePace('10'), 0.5);
+  assert.equal(api.normalizeGamePace('10'), 0.2);
   assert.equal(api.normalizeGamePace('150'), 1);
   assert.equal(api.normalizeGamePace(1.5), 1);
   assert.equal(api.normalizeGamePace(2), 1);
   assert.equal(api.normalizeGamePace('0.73'), 0.75);
   assert.equal(api.normalizeGamePace('nope'), null);
   assert.equal(api.normalizeGamePace(), null);
-  assert.equal(api.state.gamePace, 0.6);
+  assert.equal(api.state.gamePace, 0.4);
 });
 
 test('pace persists under a namespaced key and loads with a safe default', () => {
@@ -97,15 +99,15 @@ test('pace persists under a namespaced key and loads with a safe default', () =>
   assert.equal(api.state.gamePace, 0.85);
   assert.equal(storage.getItem(PACE_KEY), '0.85');
 
-  assert.equal(api.selectGamePace('10'), 0.5);
-  assert.equal(storage.getItem(PACE_KEY), '0.5');
+  assert.equal(api.selectGamePace('10'), 0.2);
+  assert.equal(storage.getItem(PACE_KEY), '0.2');
 
   const invalid = freshGame({ [PACE_KEY]: 'fast' });
-  assert.equal(invalid.api.loadGamePace(), 0.6);
-  assert.equal(invalid.api.state.gamePace, 0.6);
+  assert.equal(invalid.api.loadGamePace(), 0.4);
+  assert.equal(invalid.api.state.gamePace, 0.4);
 
   const missing = freshGame();
-  assert.equal(missing.api.loadGamePace(), 0.6);
+  assert.equal(missing.api.loadGamePace(), 0.4);
 });
 
 test('round pool is sampled once and reused by cards and schedule', () => {
@@ -183,16 +185,18 @@ test('slower pace scales movement and every arrival interval consistently', () =
   const rng = () => 0;
 
   const fast = api.buildWaveSchedule(words, rng, 1);
-  const slow = api.buildWaveSchedule(words, rng, 0.5);
+  const slow = api.buildWaveSchedule(words, rng, 0.2);
 
   assert.equal(slow.length, fast.length);
   assert.equal(fast[0].time, 1200);
-  assert.equal(slow[0].time, 2400);
+  assert.equal(slow[0].time, 6000);
   for (let i = 0; i < fast.length; i += 1) {
-    assert.equal(slow[i].time, fast[i].time * 2);
+    assert.equal(slow[i].time, fast[i].time * 5);
   }
 
   assert.equal(api.enemySpeedFor(1), api.config.enemySpeed);
+  assert.equal(api.enemySpeedFor(0.2), api.config.enemySpeed * 0.2);
+  assert.equal(api.enemySpeedFor(0.4), api.config.enemySpeed * 0.4);
   assert.equal(api.enemySpeedFor(0.5), api.config.enemySpeed * 0.5);
   assert.equal(api.enemySpeedFor(0.6), api.config.enemySpeed * 0.6);
 });
